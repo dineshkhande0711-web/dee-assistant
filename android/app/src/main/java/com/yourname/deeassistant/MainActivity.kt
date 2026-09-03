@@ -1,5 +1,6 @@
 package com.yourname.deeassistant
 
+import android.app.AlertDialog
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
@@ -12,11 +13,12 @@ import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.text.TextUtils
 import android.widget.Button
+import android.widget.EditText
+import android.widget.LinearLayout
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.app.ActivityCompat
 import org.json.JSONObject
 import java.util.Locale
 
@@ -25,11 +27,13 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     private lateinit var speechRecognizer: SpeechRecognizer
     private lateinit var tts: TextToSpeech
     private lateinit var statusText: TextView
+    private lateinit var serverInfoText: TextView
+    private lateinit var enableAccessibilityButton: Button
 
     private val micPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
             if (!granted) {
-                Toast.makeText(this, "Microphone permission is required", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "Microphone permission is required for voice commands", Toast.LENGTH_LONG).show()
             }
         }
 
@@ -37,21 +41,27 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        // Initialize network client with persisted settings
+        NetworkClient.init(this)
+
         statusText = findViewById(R.id.statusText)
+        serverInfoText = findViewById(R.id.serverInfoText)
         val micButton = findViewById<Button>(R.id.micButton)
-        val enableAccessibilityButton = findViewById<Button>(R.id.enableAccessibilityButton)
+        enableAccessibilityButton = findViewById(R.id.enableAccessibilityButton)
+        val settingsButton = findViewById<Button>(R.id.settingsButton)
 
         tts = TextToSpeech(this, this)
 
         micPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
 
         enableAccessibilityButton.setOnClickListener { openAccessibilitySettings() }
+        settingsButton.setOnClickListener { showSettingsDialog() }
 
         micButton.setOnClickListener {
             if (!isAccessibilityServiceEnabled()) {
                 Toast.makeText(
                     this,
-                    "Please enable the Accessibility Service first (button above)",
+                    "Please enable Accessibility Service first (Step 1)",
                     Toast.LENGTH_LONG
                 ).show()
                 return@setOnClickListener
@@ -59,13 +69,74 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             startListening()
         }
 
+        updateUiState()
         setupSpeechRecognizer()
         pushInstalledAppsToBackend()
     }
 
+    override fun onResume() {
+        super.onResume()
+        updateUiState()
+    }
+
+    private fun updateUiState() {
+        serverInfoText.text = "Server: ${NetworkClient.baseUrl} (${NetworkClient.deviceId})"
+        if (isAccessibilityServiceEnabled()) {
+            enableAccessibilityButton.text = "✓ Accessibility Service Enabled"
+        } else {
+            enableAccessibilityButton.text = "1. Enable Accessibility Service"
+        }
+    }
+
     // -----------------------------------------------------------------
-    // One-time-per-user setup check. This is the step a friend's phone
-    // MUST go through manually -- Android does not allow skipping it.
+    // Settings Dialog: customize Server URL and Device Token on-device
+    // -----------------------------------------------------------------
+    private fun showSettingsDialog() {
+        val layout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(50, 40, 50, 20)
+        }
+
+        val urlInput = EditText(this).apply {
+            hint = "Server URL (e.g. https://... or http://192.168.1.5:8000)"
+            setText(NetworkClient.baseUrl)
+        }
+        val deviceIdInput = EditText(this).apply {
+            hint = "Device ID (e.g. my-phone)"
+            setText(NetworkClient.deviceId)
+        }
+        val tokenInput = EditText(this).apply {
+            hint = "Device Token (e.g. change-me-1)"
+            setText(NetworkClient.deviceToken)
+        }
+
+        layout.addView(TextView(this).apply { text = "Server URL:" })
+        layout.addView(urlInput)
+        layout.addView(TextView(this).apply { text = "Device ID:" })
+        layout.addView(deviceIdInput)
+        layout.addView(TextView(this).apply { text = "Device Token:" })
+        layout.addView(tokenInput)
+
+        AlertDialog.Builder(this)
+            .setTitle("Backend Connection Settings")
+            .setView(layout)
+            .setPositiveButton("Save") { _, _ ->
+                NetworkClient.saveSettings(
+                    this,
+                    urlInput.text.toString(),
+                    deviceIdInput.text.toString(),
+                    tokenInput.text.toString()
+                )
+                updateUiState()
+                pushInstalledAppsToBackend()
+                Toast.makeText(this, "Settings updated!", Toast.LENGTH_SHORT).show()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    // -----------------------------------------------------------------
+    // Accessibility check
     // -----------------------------------------------------------------
     private fun isAccessibilityServiceEnabled(): Boolean {
         val expectedComponentName = ComponentName(this, DeeAccessibilityService::class.java)
@@ -93,26 +164,42 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     // Voice capture
     // -----------------------------------------------------------------
     private fun setupSpeechRecognizer() {
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            statusText.text = "Speech recognition is not available on this device"
+            return
+        }
         speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this)
         speechRecognizer.setRecognitionListener(object : RecognitionListener {
             override fun onResults(results: Bundle) {
                 val matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 val spokenText = matches?.firstOrNull()
                 if (!spokenText.isNullOrBlank()) {
-                    statusText.text = "You said: $spokenText"
+                    statusText.text = "You said: \"$spokenText\"\n\nAsking Dee..."
                     sendToBackend(spokenText)
+                } else {
+                    statusText.text = "Didn't catch any words. Tap to try again."
                 }
             }
 
             override fun onError(error: Int) {
-                statusText.text = "Didn't catch that -- try again"
+                val message = when (error) {
+                    SpeechRecognizer.ERROR_NO_MATCH -> "No speech detected"
+                    SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "Speech timed out"
+                    SpeechRecognizer.ERROR_NETWORK -> "Network error during speech recognition"
+                    else -> "Speech error code: $error"
+                }
+                statusText.text = "$message -- tap to try again"
             }
 
-            override fun onReadyForSpeech(params: Bundle?) { statusText.text = "Listening..." }
+            override fun onReadyForSpeech(params: Bundle?) {
+                statusText.text = "Listening... Speak now!"
+            }
             override fun onBeginningOfSpeech() {}
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {}
+            override fun onEndOfSpeech() {
+                statusText.text = "Processing speech..."
+            }
             override fun onPartialResults(partialResults: Bundle?) {}
             override fun onEvent(eventType: Int, params: Bundle?) {}
         })
@@ -137,7 +224,7 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
 
             override fun onError(error: String) {
                 runOnUiThread {
-                    statusText.text = "Error: $error"
+                    statusText.text = "Backend Error:\n$error\n\nCheck Server Settings or verify backend is running."
                 }
             }
         })
@@ -148,36 +235,46 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
             "action" -> {
                 val service = DeeAccessibilityService.instance
                 if (service == null) {
-                    statusText.text = "Accessibility service not running"
+                    statusText.text = "Accessibility service is not active. Please enable it in Settings."
                     return
                 }
                 val result = service.executeAction(response)
-                statusText.text = result
+                statusText.text = "Dee executed action:\n$result"
                 speak(result)
             }
             "answer" -> {
                 val speech = response.optString("speech", "I'm not sure.")
-                statusText.text = speech
+                statusText.text = "Dee answered:\n$speech"
                 speak(speech)
             }
-            else -> statusText.text = "Unrecognized response"
+            else -> statusText.text = "Unrecognized response from Dee: $response"
         }
     }
 
     // -----------------------------------------------------------------
-    // Installed-app registration, so the backend can resolve app names
-    // ("spotify") to real package names on THIS phone.
+    // Installed-app registration
     // -----------------------------------------------------------------
     private fun pushInstalledAppsToBackend() {
-        val pm = packageManager
-        val launchableApps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
-            .filter { pm.getLaunchIntentForPackage(it.packageName) != null }
-            .associate { pm.getApplicationLabel(it).toString() to it.packageName }
+        try {
+            val pm = packageManager
+            val launchableApps = pm.getInstalledApplications(PackageManager.GET_META_DATA)
+                .filter { pm.getLaunchIntentForPackage(it.packageName) != null }
+                .associate { pm.getApplicationLabel(it).toString() to it.packageName }
 
-        NetworkClient.registerInstalledApps(launchableApps, object : NetworkClient.Callback {
-            override fun onResult(response: JSONObject) { /* no-op */ }
-            override fun onError(error: String) { /* silent -- retried on next launch */ }
-        })
+            NetworkClient.registerInstalledApps(launchableApps, object : NetworkClient.Callback {
+                override fun onResult(response: JSONObject) {
+                    runOnUiThread {
+                        val count = response.optInt("app_count", launchableApps.size)
+                        serverInfoText.text = "Server: Connected ($count apps synced)"
+                    }
+                }
+                override fun onError(error: String) {
+                    // Silently wait or update subtitle
+                }
+            })
+        } catch (e: Exception) {
+            // Ignore background error
+        }
     }
 
     // -----------------------------------------------------------------
@@ -192,8 +289,12 @@ class MainActivity : AppCompatActivity(), TextToSpeech.OnInitListener {
     }
 
     override fun onDestroy() {
-        speechRecognizer.destroy()
-        tts.shutdown()
+        if (::speechRecognizer.isInitialized) {
+            speechRecognizer.destroy()
+        }
+        if (::tts.isInitialized) {
+            tts.shutdown()
+        }
         super.onDestroy()
     }
 }

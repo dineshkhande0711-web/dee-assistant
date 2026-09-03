@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Dee Assistant</string>
+    <string name="app_name">Dee</string>
     <string name="accessibility_service_description">
-        Lets Dee Assistant open apps and perform on-screen actions
+        Lets Dee open apps and perform on-screen actions
         (like tapping buttons) when you ask it to. It does not read or
         store your screen content anywhere.
     </string>

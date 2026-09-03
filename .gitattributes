@@ -1,0 +1,10 @@
+# Auto detect text files and normalize line endings
+* text=auto
+
+# Ensure gradlew and shell scripts always preserve LF line endings across all platforms
+android/gradlew text eol=lf
+*.sh text eol=lf
+
+# Ensure Windows batch files keep CRLF
+*.bat text eol=crlf
+*.cmd text eol=crlf

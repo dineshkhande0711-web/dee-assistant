@@ -1,0 +1,20 @@
+# Python
+backend/venv/
+backend/__pycache__/
+backend/*.pyc
+backend/.env
+
+# Android / Gradle
+android/.gradle/
+android/.idea/
+android/local.properties
+android/*.iml
+android/app/build/
+android/build/
+android/.cxx/
+android/captures/
+android/*.apk
+android/*.aab
+
+# OS
+.DS_Store

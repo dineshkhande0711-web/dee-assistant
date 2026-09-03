@@ -13,8 +13,9 @@
     <application
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
-        android:label="Dee Assistant"
-        android:theme="@style/Theme.DeeAssistant">
+        android:label="Dee"
+        android:theme="@style/Theme.Dee"
+        android:usesCleartextTraffic="true">
 
         <activity
             android:name=".MainActivity"

@@ -1,15 +1,22 @@
-# Dee Assistant — Complete Setup Guide
+# Dee — Mobile AI Voice Assistant
 
-A voice assistant that opens apps ("open Spotify"), controls basic phone
-settings, and answers spoken questions — running on your phone and, after a
-one-time manual setup, your friend's phone too.
+A personal voice assistant for Android that opens apps ("open Spotify"), controls basic phone settings (Wi-Fi panel, volume), and answers spoken questions via conversational AI — running directly on your phone.
 
 ```
 DeeAssistant/
+├── .github/
+│   └── workflows/
+│       └── build-apk.yml       <- Automated APK compiler in GitHub Actions
 ├── backend/
-│   ├── main.py            <- FastAPI server (runs on your PyCharm machine)
-│   └── requirements.txt
-├── android/
+│   ├── main.py                <- FastAPI server (Gemini, Claude, or OpenAI)
+│   ├── requirements.txt
+│   ├── .env.example
+│   └── test_backend.py        <- Verification tests
+├── android/                   <- Full Android Studio Gradle Project
+│   ├── settings.gradle
+│   ├── build.gradle
+│   ├── gradle.properties
+│   ├── gradlew / gradlew.bat
 │   └── app/
 │       ├── build.gradle
 │       └── src/main/
@@ -18,113 +25,95 @@ DeeAssistant/
 │           ├── java/.../DeeAccessibilityService.kt
 │           ├── java/.../NetworkClient.kt
 │           └── res/...
-└── README.md   (this file)
+├── render.yaml                 <- 1-click Render cloud deploy config
+└── README.md
 ```
 
-## How it works, end to end
+---
 
-1. You tap the mic button → Android's `SpeechRecognizer` converts speech to text.
-2. The text is POSTed to your FastAPI backend (`/command`).
-3. Claude decides: is this an **action** ("open spotify") or a **question**
-   ("what's the capital of France")? It returns one JSON object either way.
-4. If it's an action, `DeeAccessibilityService` executes it on-device
-   (launches the app, taps a button, etc.).
-5. If it's a question, the phone speaks the answer back via TextToSpeech.
+## Quick Start Guide
 
-## Part 1 — Backend (on your PyCharm machine)
+### Step 1: Run or Deploy the Backend
 
-```bash
-cd DeeAssistant/backend
-python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
-pip install -r requirements.txt
+You can choose **Option A (Deploy to Render for Free)** or **Option B (Run Locally on your PC)**.
 
-export ANTHROPIC_API_KEY="sk-ant-..."      # Windows: set ANTHROPIC_API_KEY=...
-export MY_PHONE_TOKEN="pick-a-long-random-string"
-export FRIEND_PHONE_TOKEN="pick-a-different-long-random-string"
+#### Option A: Deploy to Render (Cloud, Always Available)
+1. Push this folder to a GitHub repository (see Part 1 below).
+2. Go to [render.com](https://render.com) → **New → Blueprint**.
+3. Select your repository. Render reads `render.yaml` automatically.
+4. Set your environment variables:
+   - `AI_PROVIDER`: `gemini` (recommended, free tier available), `anthropic`, or `openai`
+   - `GEMINI_API_KEY` (or `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`)
+   - `MY_PHONE_TOKEN`: Any secret password you choose (e.g. `secret123`)
+5. Click **Apply**. Once deployed, copy your live URL:
+   `https://dee-assistant-backend.onrender.com`
 
-uvicorn main:app --host 0.0.0.0 --port 8000
-```
+#### Option B: Run Locally on your PC
+1. Open a terminal in `DeeAssistant/backend`.
+2. Copy `.env.example` to `.env` and enter your API key:
+   ```env
+   AI_PROVIDER=gemini
+   GEMINI_API_KEY=your_key_here
+   MY_PHONE_TOKEN=change-me-1
+   ```
+3. Run:
+   ```bash
+   uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+   ```
+4. Verify by opening `http://localhost:8000/health` in your browser.
 
-Find your machine's LAN IP (needed so phones on the same Wi-Fi can reach it):
-- Mac/Linux: `ifconfig | grep inet`
-- Windows: `ipconfig`
+---
 
-You'll get something like `192.168.1.100`. Both phones must be on the **same
-Wi-Fi network** as this machine for the default setup to work. (For remote
-access from outside the house, you'd deploy this to a small cloud VM instead
-— happy to walk through that separately if you need it.)
+### Step 2: Get the Android App on Your Phone
 
-## Part 2 — Android app
+#### Option A: Automated Cloud Build (Recommended — No Android Studio Needed)
+1. Push this repository to GitHub:
+   ```bash
+   git init
+   git add .
+   git commit -m "Dee mobile assistant setup"
+   git remote add origin https://github.com/<your-username>/dee-assistant.git
+   git branch -M main
+   git push -u origin main
+   ```
+2. In your GitHub repository, click on the **Actions** tab.
+3. You'll see the **Build Dee Assistant Android APK** workflow running.
+4. Once completed (takes ~2 minutes), click on the run and download the **DeeAssistant-debug-apk** artifact.
+5. Transfer the `.apk` file to your Android phone (or download it directly from GitHub on your phone) and tap to install!
 
-**Use Android Studio, not VS Code, for the Android client.** VS Code has no
-built-in Android SDK manager, emulator, or Gradle integration — you'd spend
-more time fighting tooling than building the app. Android Studio is free and
-is what the Kotlin/Android ecosystem actually expects; PyCharm and Android
-Studio are both JetBrains IDEs and feel similar, so the jump isn't as jarring
-as it sounds.
+#### Option B: Build with Android Studio
+1. Open Android Studio.
+2. Select **Open** and choose the `DeeAssistant/android` folder.
+3. Wait for Gradle sync to complete.
+4. Connect your Android phone with a USB cable (USB Debugging enabled in Developer Options) and click **Run** (or select **Build → Build Bundle(s) / APK(s) → Build APK(s)**).
 
-1. Open Android Studio → **New Project → Empty Views Activity** → language
-   Kotlin → minSdk 26.
-2. Replace the generated files with the ones from `android/app/src/main/`
-   in this project (same folder structure — `MainActivity.kt`,
-   `DeeAccessibilityService.kt`, `NetworkClient.kt`,
-   `AndroidManifest.xml`, `activity_main.xml`, `strings.xml`,
-   `accessibility_service_config.xml`).
-3. Merge the `dependencies { }` block from `android/app/build.gradle` into
-   your project's `app/build.gradle`.
-4. In `NetworkClient.kt`, set:
-   - `BASE_URL` → `"http://<your-machine-LAN-IP>:8000"`
-   - `DEVICE_ID` / `DEVICE_TOKEN` → `"my-phone"` / your `MY_PHONE_TOKEN`
-5. Click **Run** with your phone connected via USB (enable Developer Options
-   → USB Debugging first), or build an APK via **Build → Build APK(s)**.
+---
 
-## Part 3 — First-time setup on each phone (yours, then your friend's)
+### Step 3: First-Time Phone Permissions Setup
 
-This part cannot be automated or done remotely — Android deliberately
-requires a human to do this in person, as an anti-malware protection:
+Android requires granting two permissions for the voice assistant:
 
-1. Install the app (USB install, or share the built APK file to install).
-2. Open it → tap **"1. Enable Accessibility Service"** → it opens Android
-   Settings → find "Dee Assistant" under Accessibility → toggle it on →
-   confirm the warning dialog (Android 13+ shows this twice, by design).
-3. Return to the app → grant the microphone permission if prompted.
-4. Tap **"2. Tap and Speak"** → say **"open Spotify"** → it should launch.
+1. **Accessibility Service**:
+   - Open the **Dee** app.
+   - Tap **"1. Accessibility Service Settings"**.
+   - Find **Dee** in the Accessibility list and toggle it **ON**.
+   - Confirm the system dialog (this allows Dee to open apps and tap buttons on your command).
+2. **Microphone**:
+   - Return to the Dee app.
+   - Grant microphone permission when prompted.
+3. **Configure Backend URL**:
+   - Tap **"⚙️ Server Settings"** in the app.
+   - Enter your backend URL (e.g., `https://your-backend.onrender.com` or `http://192.168.x.x:8000`) and your Device Token.
+   - Tap **Save**.
 
-For your friend's build: change `DEVICE_ID`/`DEVICE_TOKEN` in their copy of
-`NetworkClient.kt` to `"friend-phone"` / `FRIEND_PHONE_TOKEN` before you build
-their APK, so the backend tells the two phones apart and rate-limits/audits
-them separately.
+---
 
-## Testing the "open Spotify" flow specifically
+### Step 4: Use Your Assistant!
 
-The app auto-sends its installed-app list to `/register_apps` on launch, so
-the backend knows the exact package name for Spotify on that phone. Say
-"open Spotify" → Claude matches it against that list → returns
-`{"kind":"action","action":"open_app","package_name":"com.spotify.music"}` →
-the accessibility service launches it. If Spotify isn't installed, it'll
-still try a best-guess package name and report "App not installed."
-
-## Extending it
-
-- More actions: add a new `when` branch in `DeeAccessibilityService.kt`
-  and describe it in the backend's `SYSTEM_PROMPT_TEMPLATE`.
-- Wake word ("Hey Dee") instead of a tap: look at Porcupine or
-  `SpeechRecognizer`'s continuous-listening mode — different enough to be
-  its own follow-up if you want it.
-- Multi-turn conversation: currently every command is stateless; you'd add
-  a per-device message history array to `/command`'s request.
-
-## Security checklist before giving this to a friend
-
-- [ ] Backend requires the `Authorization: Bearer <token>` header (already
-      enforced in `main.py` — don't remove `check_auth`).
-- [ ] Each phone has its own unique token, not a shared one.
-- [ ] The friend understands what the app can see/do (screen content,
-      app launching) before they enable the accessibility service —
-      this should be their informed choice, not a surprise.
-- [ ] `allowBackup="false"` stays set (already in the manifest) so no auto
-      cloud-backup of app data.
-- [ ] If you ever expose the backend outside your home Wi-Fi, put it behind
-      HTTPS (e.g. Caddy/nginx with a real cert) — tokens sent over plain
-      HTTP on the open internet are as good as no auth at all.
+1. Tap **"🎤 Tap to Speak"**.
+2. Try speaking:
+   - *"Open Spotify"* or *"Open WhatsApp"*
+   - *"Turn on Wi-Fi"* or *"Open volume settings"*
+   - *"What is the distance to the moon?"*
+   - *"Tell me a quick joke"*
+3. Dee will execute the action or answer aloud via Text-to-Speech!
