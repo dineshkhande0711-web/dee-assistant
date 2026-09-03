@@ -199,7 +199,7 @@ def call_llm(user_text: str, device_id: str) -> dict:
             except (ImportError, AttributeError):
                 import google.generativeai as genai
                 genai.configure(api_key=api_key)
-                model_name = os.environ.get("GEMINI_MODEL", "gemini-1.5-flash")
+                model_name = os.environ.get("GEMINI_MODEL", "gemini-3.6-flash")
                 model = genai.GenerativeModel(
                     model_name=model_name,
                     system_instruction=system_prompt,
