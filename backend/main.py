@@ -21,6 +21,7 @@ from typing import Optional, Literal
 from dotenv import load_dotenv
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 
 # Load environment variables from .env if present
@@ -269,14 +270,208 @@ def call_llm(user_text: str, device_id: str) -> dict:
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
-@app.get("/")
+@app.get("/", response_class=HTMLResponse)
 async def root():
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dee — Mobile AI Voice Assistant</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; }
+        body { background: #0f172a; color: #f8fafc; display: flex; flex-direction: column; min-height: 100vh; }
+        header { padding: 1rem 1.5rem; background: #1e293b; border-bottom: 1px solid #334155; display: flex; align-items: center; justify-content: space-between; }
+        .logo { font-size: 1.3rem; font-weight: 700; background: linear-gradient(135deg, #818cf8, #c084fc); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+        .badge { font-size: 0.75rem; background: #065f46; color: #34d399; padding: 0.25rem 0.65rem; border-radius: 9999px; font-weight: 600; }
+        .chat-container { flex: 1; overflow-y: auto; padding: 1.5rem; display: flex; flex-direction: column; gap: 1rem; max-width: 600px; width: 100%; margin: 0 auto; }
+        .msg { max-width: 85%; padding: 0.85rem 1.2rem; border-radius: 1.2rem; font-size: 0.95rem; line-height: 1.45; word-wrap: break-word; }
+        .user-msg { align-self: flex-end; background: #6366f1; color: white; border-bottom-right-radius: 0.2rem; }
+        .bot-msg { align-self: flex-start; background: #1e293b; border: 1px solid #334155; border-bottom-left-radius: 0.2rem; }
+        .action-tag { display: inline-block; background: #0284c7; color: white; padding: 0.2rem 0.6rem; border-radius: 4px; font-size: 0.75rem; margin-bottom: 0.4rem; font-weight: bold; }
+        .controls { background: #1e293b; border-top: 1px solid #334155; padding: 1.2rem; display: flex; flex-direction: column; align-items: center; gap: 0.85rem; }
+        .mic-btn { width: 72px; height: 72px; border-radius: 50%; border: none; background: linear-gradient(135deg, #6366f1, #a855f7); color: white; font-size: 2rem; cursor: pointer; box-shadow: 0 4px 18px rgba(99, 102, 241, 0.45); display: flex; align-items: center; justify-content: center; transition: all 0.2s ease; }
+        .mic-btn:hover { transform: scale(1.05); }
+        .mic-btn.listening { animation: pulse 1.5s infinite; background: #ef4444; }
+        @keyframes pulse { 0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); } 70% { box-shadow: 0 0 0 22px rgba(239, 68, 68, 0); } 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); } }
+        .status-text { font-size: 0.85rem; color: #94a3b8; }
+        .input-row { display: flex; width: 100%; max-width: 600px; gap: 0.5rem; }
+        .text-input { flex: 1; padding: 0.75rem 1rem; border-radius: 0.75rem; border: 1px solid #334155; background: #0f172a; color: white; font-size: 0.95rem; outline: none; }
+        .text-input:focus { border-color: #6366f1; }
+        .send-btn { padding: 0.75rem 1.25rem; border-radius: 0.75rem; border: none; background: #6366f1; color: white; font-weight: 600; cursor: pointer; }
+        .download-banner { background: #1e1b4b; border: 1px solid #4338ca; padding: 0.75rem 1rem; border-radius: 0.75rem; max-width: 600px; width: 100%; margin: 0.5rem auto; font-size: 0.85rem; display: flex; justify-content: space-between; align-items: center; }
+        .download-banner a { color: #818cf8; font-weight: bold; text-decoration: none; }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo">Dee AI Assistant</div>
+        <div class="badge">Online</div>
+    </header>
+
+    <div class="chat-container" id="chat">
+        <div class="download-banner">
+            <span>📱 Need the Android App?</span>
+            <a href="/download-apk">Download DeeAssistant.apk</a>
+        </div>
+        <div class="msg bot-msg">
+            Hello! I am Dee, your mobile AI voice assistant. Tap the microphone below and speak, or type your question or command!
+        </div>
+    </div>
+
+    <div class="controls">
+        <button class="mic-btn" id="micBtn" title="Tap to speak">🎤</button>
+        <div class="status-text" id="statusText">Tap microphone to speak</div>
+        <div class="input-row">
+            <input type="text" id="textInput" class="text-input" placeholder="Type a message or command..." />
+            <button class="send-btn" id="sendBtn">Send</button>
+        </div>
+    </div>
+
+    <script>
+        const chat = document.getElementById('chat');
+        const micBtn = document.getElementById('micBtn');
+        const statusText = document.getElementById('statusText');
+        const textInput = document.getElementById('textInput');
+        const sendBtn = document.getElementById('sendBtn');
+
+        let isListening = false;
+        let recognition = null;
+
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.lang = 'en-US';
+
+            recognition.onstart = () => {
+                isListening = true;
+                micBtn.classList.add('listening');
+                statusText.innerText = 'Listening... Speak now!';
+            };
+
+            recognition.onresult = (event) => {
+                const text = event.results[0][0].transcript;
+                statusText.innerText = 'Sending command...';
+                handleUserCommand(text);
+            };
+
+            recognition.onerror = (event) => {
+                statusText.innerText = 'Mic error: ' + event.error;
+                micBtn.classList.remove('listening');
+                isListening = false;
+            };
+
+            recognition.onend = () => {
+                isListening = false;
+                micBtn.classList.remove('listening');
+            };
+        } else {
+            statusText.innerText = 'Voice recognition not supported in this browser. Use text below.';
+        }
+
+        micBtn.addEventListener('click', () => {
+            if (!recognition) {
+                alert('Speech recognition is not available in your browser. Please use Chrome/Edge or type below.');
+                return;
+            }
+            if (isListening) {
+                recognition.stop();
+            } else {
+                recognition.start();
+            }
+        });
+
+        sendBtn.addEventListener('click', () => {
+            const text = textInput.value.trim();
+            if (text) {
+                textInput.value = '';
+                handleUserCommand(text);
+            }
+        });
+
+        textInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') sendBtn.click();
+        });
+
+        function addMessage(text, isUser, actionTag = null) {
+            const div = document.createElement('div');
+            div.className = 'msg ' + (isUser ? 'user-msg' : 'bot-msg');
+            if (actionTag) {
+                div.innerHTML = '<span class="action-tag">' + actionTag + '</span><br>' + text;
+            } else {
+                div.innerText = text;
+            }
+            chat.appendChild(div);
+            chat.scrollTop = chat.scrollHeight;
+        }
+
+        function speak(text) {
+            if ('speechSynthesis' in window) {
+                window.speechSynthesis.cancel();
+                const utter = new SpeechSynthesisUtterance(text);
+                window.speechSynthesis.speak(utter);
+            }
+        }
+
+        async function handleUserCommand(text) {
+            addMessage(text, true);
+            statusText.innerText = 'Dee is thinking...';
+
+            try {
+                const res = await fetch('/command', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer change-me-1'
+                    },
+                    body: JSON.stringify({ text: text, device_id: 'my-phone' })
+                });
+
+                const data = await res.json();
+                statusText.innerText = 'Ready';
+
+                if (data.kind === 'action') {
+                    const desc = 'Action: ' + data.action + (data.package_name ? ' (' + data.package_name + ')' : '');
+                    addMessage(desc, false, 'Action Triggered');
+                    speak('Executing ' + data.action);
+                } else if (data.kind === 'answer') {
+                    addMessage(data.speech, false);
+                    speak(data.speech);
+                } else {
+                    addMessage('Response: ' + JSON.stringify(data), false);
+                }
+            } catch (err) {
+                statusText.innerText = 'Error: ' + err.message;
+                addMessage('Error connecting to backend: ' + err.message, false);
+            }
+        }
+    </script>
+</body>
+</html>
+"""
+
+
+@app.get("/download-apk")
+async def download_apk():
+    from fastapi.responses import FileResponse
+    apk_path = "c:/Users/DELL/Downloads/DeeAssistant/DeeAssistant.apk"
+    if os.path.exists(apk_path):
+        return FileResponse(apk_path, media_type="application/vnd.android.package-archive", filename="DeeAssistant.apk")
+    return {"error": "APK not found"}
+
+
+@app.get("/api")
+async def api_info():
     return {
         "service": "Dee Assistant Backend",
         "status": "online",
         "provider": get_ai_provider(),
         "registered_devices": list(INSTALLED_APPS.keys()),
         "endpoints": {
+            "web_ui": "/",
+            "download_apk": "/download-apk",
             "health": "/health",
             "command": "POST /command",
             "register_apps": "POST /register_apps",
