@@ -73,7 +73,6 @@
         <!-- Setup Step 1 -->
         <Button
             android:id="@+id/enableAccessibilityButton"
-            style="?attr/materialButtonOutlinedStyle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="1. Accessibility Service Settings"
@@ -82,7 +81,6 @@
         <!-- Settings Button -->
         <Button
             android:id="@+id/settingsButton"
-            style="?attr/materialButtonOutlinedStyle"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:text="⚙️  Server Settings"
